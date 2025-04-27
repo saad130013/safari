@@ -2,10 +2,9 @@
 import streamlit as st
 import pandas as pd
 import sqlite3
-import os
 import plotly.express as px
 
-# إنشاء أو الاتصال بقاعدة بيانات بسيطة
+# إعداد قاعدة البيانات
 conn = sqlite3.connect('statements.db')
 cursor = conn.cursor()
 cursor.execute('''
@@ -23,9 +22,31 @@ cursor.execute('''
 ''')
 conn.commit()
 
+# إعداد صفحة ستريملت
 st.set_page_config(page_title="نظام مستخلصات سفاري", layout="wide", page_icon="📄")
-st.title("📄 نظام إدارة المستخلصات الشهرية لشركة سفاري")
-st.caption("نظام ذكي لتحليل المستخلصات الشهرية، عرض الأداء، والتفاصيل التفاعلية للمستهلكات والمعدات والمخالفات 📊")
+st.markdown("""
+<style>
+    .big-font {
+        font-size:24px !important;
+        font-weight:bold;
+    }
+    .card {
+        padding: 20px;
+        background-color: #f9f9f9;
+        border-radius: 10px;
+        box-shadow: 2px 2px 5px #ccc;
+        text-align: center;
+    }
+    .highlight {
+        color: #ff6347;
+        font-weight: bold;
+    }
+</style>
+""", unsafe_allow_html=True)
+
+st.title("📄 نظام إدارة المستخلصات الشهرية لشركة سفاري - واجهة حديثة")
+st.caption("نظام ذكي لتحليل المستخلصات وعرضها بشكل تفاعلي ومنظم")
+
 
 uploaded_file = st.file_uploader("📂 ارفع ملف المستخلص (Excel)", type=["xlsx"])
 
@@ -39,6 +60,7 @@ if uploaded_file:
         with col2:
             year = st.number_input("📆 ادخل السنة", min_value=2020, max_value=2100, value=2025)
         submitted = st.form_submit_button("📥 تحليل وحفظ المستخلص")
+
 
     if submitted:
         try:
@@ -57,7 +79,7 @@ if uploaded_file:
             conn.commit()
             st.success("✅ تم حفظ المستخلص وتحليله بنجاح!")
         except Exception as e:
-            st.error(f"❌ حدث خطأ أثناء قراءة شيت 'قيمة الخدمة': {e}")
+            st.error(f"❌ خطأ أثناء قراءة شيت 'قيمة الخدمة': {e}")
 
     try:
         consumables_df = xl.parse("المستهلكات")
@@ -82,20 +104,20 @@ if uploaded_file:
     st.header("📊 مقارنة وتحليل المستخلصات الشهرية")
     data = pd.read_sql_query("SELECT * FROM service_statements", conn)
     if not data.empty:
-        st.subheader("📋 بيانات ملخصة")
-        cols = st.columns(3)
-        with cols[0]:
-            st.metric("📅 الشهر", data.iloc[-1]['month'])
-        with cols[1]:
-            st.metric("📆 السنة", int(data.iloc[-1]['year']))
-        with cols[2]:
-            st.metric("💵 إجمالي مع الضريبة", f"{data.iloc[-1]['total_with_vat']:,.2f} ريال")
+        st.subheader("📋 ملخص المستخلص الأخير")
+        col1, col2, col3 = st.columns(3)
+        col4, col5 = st.columns(2)
 
-        col3, col4 = st.columns(2)
+        with col1:
+            st.markdown(f"<div class='card'>📅<br>الشهر<br><span class='big-font'>{data.iloc[-1]['month']}</span></div>", unsafe_allow_html=True)
+        with col2:
+            st.markdown(f"<div class='card'>📆<br>السنة<br><span class='big-font'>{int(data.iloc[-1]['year'])}</span></div>", unsafe_allow_html=True)
         with col3:
-            st.metric("🧹 عدد المناطق الحرجة", int(data.iloc[-1]['critical_areas']))
+            st.markdown(f"<div class='card'>💵<br>الإجمالي مع الضريبة<br><span class='big-font'>{data.iloc[-1]['total_with_vat']:,.2f} ريال</span></div>", unsafe_allow_html=True)
         with col4:
-            st.metric("🏢 عدد المناطق العامة", int(data.iloc[-1]['general_areas']))
+            st.markdown(f"<div class='card'>🧹<br>مناطق حرجة<br><span class='big-font'>{int(data.iloc[-1]['critical_areas'])}</span></div>", unsafe_allow_html=True)
+        with col5:
+            st.markdown(f"<div class='card'>🏢<br>مناطق عامة<br><span class='big-font'>{int(data.iloc[-1]['general_areas'])}</span></div>", unsafe_allow_html=True)
 
         st.divider()
 
@@ -106,43 +128,64 @@ if uploaded_file:
         fig.update_layout(yaxis_tickformat=",.2f")
         st.plotly_chart(fig, use_container_width=True)
 
-        st.subheader("📉 مقارنة الفرق بين الشهور")
-        data_sorted = data.sort_values(['year', 'month'])
-        data_sorted['التغير الشهري (%)'] = data_sorted['total_with_vat'].pct_change() * 100
-        st.dataframe(data_sorted[['month', 'year', 'total_with_vat', 'التغير الشهري (%)']].round(2), use_container_width=True)
-
         st.divider()
 
         st.subheader("📂 تفاصيل إضافية")
 
+        with st.expander("📑 تفاصيل قيمة الخدمة"):
+
+            try:
+
+                service_details = xl.parse("قيمة الخدمة")
+
+                st.dataframe(service_details.iloc[0:5, 1:14], use_container_width=True)
+
+            except:
+
+                st.info("لا توجد بيانات تفصيلية لقيمة الخدمة.")
+
         with st.expander("📦 المستهلكات"):
+
             if not consumables_df.empty:
+
                 st.dataframe(consumables_df, use_container_width=True)
+
             else:
+
                 st.info("لا توجد بيانات مستهلكات.")
 
         with st.expander("⚙️ المعدات والأجهزة"):
+
             if not equipment_df.empty:
+
                 st.dataframe(equipment_df, use_container_width=True)
+
             else:
+
                 st.info("لا توجد بيانات معدات وأجهزة.")
 
         with st.expander("🕵️‍♂️ مخالفات المراقبين"):
+
             if not observers_df.empty:
-                st.dataframe(observers_df, use_container_width=True)
+
+                st.dataframe(observers_df[['التاريخ', 'الموقع', 'اسم الموقع', 'المخالفة', 'مبلغ المخالفة']], use_container_width=True)
+
+                st.success(f"✅ إجمالي الغرامات: {observers_df['مبلغ المخالفة'].sum():,.2f} ريال سعودي")
+
             else:
+
                 st.info("لا توجد مخالفات مراقبين.")
 
         with st.expander("🚨 الغرامات"):
-            if not penalties_df.empty:
-                st.dataframe(penalties_df, use_container_width=True)
-            else:
-                st.info("لا توجد غرامات.")
 
-        with st.expander("⬇️ تحميل البيانات الكاملة"):
-            csv = data.to_csv(index=False).encode('utf-8-sig')
-            st.download_button("📥 تحميل CSV", data=csv, file_name='service_statements.csv', mime='text/csv')
+            if not penalties_df.empty:
+
+                st.dataframe(penalties_df, use_container_width=True)
+
+            else:
+
+                st.info("لا توجد غرامات.")
     else:
-        st.info("ℹ️ لا توجد بيانات مضافة بعد. يرجى رفع أول مستخلص.")
+        st.info("ℹ️ لا توجد بيانات مضافة بعد. يرجى رفع مستخلص.")
 else:
-    st.info("📂 يرجى رفع ملف مستخلص (Excel) لبدء التحليل.")
+    st.info("📂 الرجاء رفع ملف مستخلص (Excel) لبدء التحليل.")

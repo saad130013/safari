@@ -3,4 +3,3 @@ streamlit
 pandas
 openpyxl
 plotly
-sqlite3

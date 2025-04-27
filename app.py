@@ -1,126 +1,54 @@
-
 import streamlit as st
 import pandas as pd
 import sqlite3
+import os
 import plotly.express as px
 
-# إعداد قاعدة البيانات
-conn = sqlite3.connect('statements.db')
-cursor = conn.cursor()
-cursor.execute('''
-    CREATE TABLE IF NOT EXISTS service_statements (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        month TEXT,
-        year INTEGER,
-        critical_areas INTEGER,
-        medium_risk_areas INTEGER,
-        general_areas INTEGER,
-        total_cost REAL,
-        vat REAL,
-        total_with_vat REAL
-    )
-''')
-conn.commit()
+# إنشاء أو الاتصال بقاعدة بيانات بسيطة
+def connect_db():
+    conn = sqlite3.connect('statements.db')
+    cursor = conn.cursor()
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS service_statements (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            month TEXT,
+            year INTEGER,
+            critical_areas INTEGER,
+            medium_risk_areas INTEGER,
+            general_areas INTEGER,
+            total_cost REAL,
+            vat REAL,
+            total_with_vat REAL
+        )
+    ''')
+    conn.commit()
+    return conn, cursor
 
-# إعداد صفحة ستريملت
-st.set_page_config(page_title="نظام مستخلصات سفاري", layout="wide", page_icon="📄")
-st.markdown("""
-<style>
-    .big-font {
-        font-size:24px !important;
-        font-weight:bold;
-    }
-    .card {
-        padding: 20px;
-        background-color: #f9f9f9;
-        border-radius: 10px;
-        box-shadow: 2px 2px 5px #ccc;
-        text-align: center;
-    }
-    .highlight {
-        color: #ff6347;
-        font-weight: bold;
-    }
-</style>
-""", unsafe_allow_html=True)
-
-st.title("📄 نظام إدارة المستخلصات الشهرية لشركة سفاري - واجهة حديثة")
-st.caption("نظام ذكي لتحليل المستخلصات وعرضها بشكل تفاعلي ومنظم")
-
-
-uploaded_file = st.file_uploader("📂 ارفع ملف المستخلص (Excel)", type=["xlsx"])
-
-if uploaded_file:
-    xl = pd.ExcelFile(uploaded_file)
-
-    with st.form("form"):
-        col1, col2 = st.columns(2)
-        with col1:
-            month = st.selectbox("📅 اختر الشهر", ["يناير", "فبراير", "مارس", "ابريل", "مايو", "يونيو", "يوليو", "اغسطس", "سبتمبر", "اكتوبر", "نوفمبر", "ديسمبر"])
-        with col2:
-            year = st.number_input("📆 ادخل السنة", min_value=2020, max_value=2100, value=2025)
-        submitted = st.form_submit_button("📥 تحليل وحفظ المستخلص")
-
-
-    if submitted:
-        try:
-            service_sheet = xl.parse("قيمة الخدمة")
-            critical_areas = int(service_sheet.iloc[2, 2])
-            medium_risk_areas = int(service_sheet.iloc[3, 2])
-            general_areas = int(service_sheet.iloc[4, 2])
-            total_cost = float(service_sheet.iloc[2, 11] + service_sheet.iloc[3, 11] + service_sheet.iloc[4, 11])
-            vat = float(service_sheet.iloc[2, 12] + service_sheet.iloc[3, 12] + service_sheet.iloc[4, 12])
-            total_with_vat = float(service_sheet.iloc[2, 13] + service_sheet.iloc[3, 13] + service_sheet.iloc[4, 13])
-
-            cursor.execute('''
-                INSERT INTO service_statements (month, year, critical_areas, medium_risk_areas, general_areas, total_cost, vat, total_with_vat)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-            ''', (month, year, critical_areas, medium_risk_areas, general_areas, total_cost, vat, total_with_vat))
-            conn.commit()
-            st.success("✅ تم حفظ المستخلص وتحليله بنجاح!")
-        except Exception as e:
-            st.error(f"❌ خطأ أثناء قراءة شيت 'قيمة الخدمة': {e}")
-
+# قراءة ورقة عمل معينة من ملف Excel
+def read_sheet(xl, sheet_name):
     try:
-        consumables_df = xl.parse("المستهلكات")
-    except:
-        consumables_df = pd.DataFrame()
+        return xl.parse(sheet_name)
+    except Exception as e:
+        st.warning(f"⚠️ لم يتم العثور على الورقة '{sheet_name}': {e}")
+        return pd.DataFrame()
 
+# حساب الإجماليات
+def calculate_totals(service_sheet):
     try:
-        equipment_df = xl.parse("المعدات والأجهزة")
-    except:
-        equipment_df = pd.DataFrame()
+        critical_areas = int(service_sheet.iloc[2, 2])
+        medium_risk_areas = int(service_sheet.iloc[3, 2])
+        general_areas = int(service_sheet.iloc[4, 2])
+        total_cost = float(service_sheet.iloc[2, 11] + service_sheet.iloc[3, 11] + service_sheet.iloc[4, 11])
+        vat = float(service_sheet.iloc[2, 12] + service_sheet.iloc[3, 12] + service_sheet.iloc[4, 12])
+        total_with_vat = float(service_sheet.iloc[2, 13] + service_sheet.iloc[3, 13] + service_sheet.iloc[4, 13])
+        return critical_areas, medium_risk_areas, general_areas, total_cost, vat, total_with_vat
+    except Exception as e:
+        st.error(f"❌ حدث خطأ أثناء حساب الإجماليات: {e}")
+        return None, None, None, None, None, None
 
-    try:
-        observers_df = xl.parse("مخالفات المراقبين")
-    except:
-        observers_df = pd.DataFrame()
-
-    try:
-        penalties_df = xl.parse("الغرامات")
-    except:
-        penalties_df = pd.DataFrame()
-
-    st.header("📊 مقارنة وتحليل المستخلصات الشهرية")
-    data = pd.read_sql_query("SELECT * FROM service_statements", conn)
+# عرض الرسوم البيانية
+def display_charts(data):
     if not data.empty:
-        st.subheader("📋 ملخص المستخلص الأخير")
-        col1, col2, col3 = st.columns(3)
-        col4, col5 = st.columns(2)
-
-        with col1:
-            st.markdown(f"<div class='card'>📅<br>الشهر<br><span class='big-font'>{data.iloc[-1]['month']}</span></div>", unsafe_allow_html=True)
-        with col2:
-            st.markdown(f"<div class='card'>📆<br>السنة<br><span class='big-font'>{int(data.iloc[-1]['year'])}</span></div>", unsafe_allow_html=True)
-        with col3:
-            st.markdown(f"<div class='card'>💵<br>الإجمالي مع الضريبة<br><span class='big-font'>{data.iloc[-1]['total_with_vat']:,.2f} ريال</span></div>", unsafe_allow_html=True)
-        with col4:
-            st.markdown(f"<div class='card'>🧹<br>مناطق حرجة<br><span class='big-font'>{int(data.iloc[-1]['critical_areas'])}</span></div>", unsafe_allow_html=True)
-        with col5:
-            st.markdown(f"<div class='card'>🏢<br>مناطق عامة<br><span class='big-font'>{int(data.iloc[-1]['general_areas'])}</span></div>", unsafe_allow_html=True)
-
-        st.divider()
-
         st.subheader("📈 تطور إجمالي الفواتير")
         fig = px.bar(data, x='month', y='total_with_vat', color='month', text_auto=True,
                      labels={'total_with_vat': 'إجمالي الفاتورة (مع الضريبة)'},
@@ -128,64 +56,114 @@ if uploaded_file:
         fig.update_layout(yaxis_tickformat=",.2f")
         st.plotly_chart(fig, use_container_width=True)
 
-        st.divider()
+        st.subheader("📉 مقارنة الفرق بين الشهور")
+        data_sorted = data.sort_values(['year', 'month'])
+        data_sorted['التغير الشهري (%)'] = data_sorted['total_with_vat'].pct_change() * 100
+        st.dataframe(data_sorted[['month', 'year', 'total_with_vat', 'التغير الشهري (%)']].round(2), use_container_width=True)
 
-        st.subheader("📂 تفاصيل إضافية")
+# الواجهة الرئيسية
+def main():
+    st.set_page_config(page_title="نظام مستخلصات سفاري", layout="wide", page_icon="📄")
+    st.title("📄 نظام إدارة المستخلصات الشهرية لشركة سفاري")
+    st.caption("نظام ذكي لتحليل المستخلصات الشهرية، عرض الأداء، والتفاصيل التفاعلية للمستهلكات والمعدات والمخالفات 📊")
 
-        with st.expander("📑 تفاصيل قيمة الخدمة"):
+    uploaded_file = st.file_uploader("📂 ارفع ملف المستخلص (Excel)", type=["xlsx"])
+    if uploaded_file:
+        xl = pd.ExcelFile(uploaded_file)
+        with st.form("form"):
+            col1, col2 = st.columns(2)
+            with col1:
+                month = st.selectbox("📅 اختر الشهر", ["يناير", "فبراير", "مارس", "ابريل", "مايو", "يونيو", "يوليو", "اغسطس", "سبتمبر", "اكتوبر", "نوفمبر", "ديسمبر"])
+            with col2:
+                year = st.number_input("📆 ادخل السنة", min_value=2020, max_value=2100, value=2025)
+            submitted = st.form_submit_button("📥 تحليل وحفظ المستخلص")
 
+        if submitted:
+            conn, cursor = connect_db()
             try:
+                service_sheet = read_sheet(xl, "قيمة الخدمة")
+                if service_sheet.empty:
+                    st.error("❌ الورقة 'قيمة الخدمة' غير موجودة أو تحتوي على بيانات غير صحيحة.")
+                    return
 
-                service_details = xl.parse("قيمة الخدمة")
+                critical_areas, medium_risk_areas, general_areas, total_cost, vat, total_with_vat = calculate_totals(service_sheet)
+                if None in [critical_areas, medium_risk_areas, general_areas, total_cost, vat, total_with_vat]:
+                    return
 
-                st.dataframe(service_details.iloc[0:5, 1:14], use_container_width=True)
+                cursor.execute('''
+                    INSERT INTO service_statements (month, year, critical_areas, medium_risk_areas, general_areas, total_cost, vat, total_with_vat)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                ''', (month, year, critical_areas, medium_risk_areas, general_areas, total_cost, vat, total_with_vat))
+                conn.commit()
+                st.success("✅ تم حفظ المستخلص وتحليله بنجاح!")
+            except Exception as e:
+                st.error(f"❌ حدث خطأ أثناء المعالجة: {e}")
+            finally:
+                conn.close()
 
-            except:
+        # قراءة الأوراق الأخرى
+        consumables_df = read_sheet(xl, "المستهلكات")
+        equipment_df = read_sheet(xl, "المعدات والأجهزة")
+        observers_df = read_sheet(xl, "مخالفات المراقبين")
+        penalties_df = read_sheet(xl, "الغرامات")
 
-                st.info("لا توجد بيانات تفصيلية لقيمة الخدمة.")
+        # عرض البيانات المحفوظة
+        conn, cursor = connect_db()
+        data = pd.read_sql_query("SELECT * FROM service_statements", conn)
+        conn.close()
 
-        with st.expander("📦 المستهلكات"):
+        if not data.empty:
+            st.header("📊 مقارنة وتحليل المستخلصات الشهرية")
+            st.subheader("📋 بيانات ملخصة")
+            cols = st.columns(3)
+            with cols[0]:
+                st.metric("📅 الشهر", data.iloc[-1]['month'])
+            with cols[1]:
+                st.metric("📆 السنة", int(data.iloc[-1]['year']))
+            with cols[2]:
+                st.metric("💵 إجمالي مع الضريبة", f"{data.iloc[-1]['total_with_vat']:,.2f} ريال")
 
-            if not consumables_df.empty:
+            col3, col4 = st.columns(2)
+            with col3:
+                st.metric("🧹 عدد المناطق الحرجة", int(data.iloc[-1]['critical_areas']))
+            with col4:
+                st.metric("🏢 عدد المناطق العامة", int(data.iloc[-1]['general_areas']))
 
-                st.dataframe(consumables_df, use_container_width=True)
+            st.divider()
+            display_charts(data)
 
-            else:
+            st.subheader("📂 تفاصيل إضافية")
+            with st.expander("📦 المستهلكات"):
+                if not consumables_df.empty:
+                    st.dataframe(consumables_df, use_container_width=True)
+                else:
+                    st.info("لا توجد بيانات مستهلكات.")
 
-                st.info("لا توجد بيانات مستهلكات.")
+            with st.expander("⚙️ المعدات والأجهزة"):
+                if not equipment_df.empty:
+                    st.dataframe(equipment_df, use_container_width=True)
+                else:
+                    st.info("لا توجد بيانات معدات وأجهزة.")
 
-        with st.expander("⚙️ المعدات والأجهزة"):
+            with st.expander("🕵️‍♂️ مخالفات المراقبين"):
+                if not observers_df.empty:
+                    st.dataframe(observers_df, use_container_width=True)
+                else:
+                    st.info("لا توجد مخالفات مراقبين.")
 
-            if not equipment_df.empty:
+            with st.expander("🚨 الغرامات"):
+                if not penalties_df.empty:
+                    st.dataframe(penalties_df, use_container_width=True)
+                else:
+                    st.info("لا توجد غرامات.")
 
-                st.dataframe(equipment_df, use_container_width=True)
-
-            else:
-
-                st.info("لا توجد بيانات معدات وأجهزة.")
-
-        with st.expander("🕵️‍♂️ مخالفات المراقبين"):
-
-            if not observers_df.empty:
-
-                st.dataframe(observers_df[['التاريخ', 'الموقع', 'اسم الموقع', 'المخالفة', 'مبلغ المخالفة']], use_container_width=True)
-
-                st.success(f"✅ إجمالي الغرامات: {observers_df['مبلغ المخالفة'].sum():,.2f} ريال سعودي")
-
-            else:
-
-                st.info("لا توجد مخالفات مراقبين.")
-
-        with st.expander("🚨 الغرامات"):
-
-            if not penalties_df.empty:
-
-                st.dataframe(penalties_df, use_container_width=True)
-
-            else:
-
-                st.info("لا توجد غرامات.")
+            with st.expander("⬇️ تحميل البيانات الكاملة"):
+                csv = data.to_csv(index=False).encode('utf-8-sig')
+                st.download_button("📥 تحميل CSV", data=csv, file_name='service_statements.csv', mime='text/csv')
+        else:
+            st.info("ℹ️ لا توجد بيانات مضافة بعد. يرجى رفع أول مستخلص.")
     else:
-        st.info("ℹ️ لا توجد بيانات مضافة بعد. يرجى رفع مستخلص.")
-else:
-    st.info("📂 الرجاء رفع ملف مستخلص (Excel) لبدء التحليل.")
+        st.info("📂 يرجى رفع ملف مستخلص (Excel) لبدء التحليل.")
+
+if __name__ == "__main__":
+    main()
